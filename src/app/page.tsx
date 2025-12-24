@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Send, Paperclip, X, Loader2, Shield, MessageSquare, Plus, Trash2, 
   AlertCircle, BarChart3, CheckCircle, XCircle, TrendingUp, Mail, BookOpen, 
   RefreshCw, Users, Download, Copy, Info, Clock, ExternalLink, ChevronRight, 
-  Filter } from 'lucide-react';
+  Filter, Wrench, History, Settings, FileText, Search, Image, CreditCard, 
+  Ticket, Database, Eye, Play, StopCircle, Calendar, Key, Tag } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -56,10 +57,34 @@ interface EmailConfig {
   serverTime: string;
 }
 
-const API_URL = 'https://customer-support-backend-nspr.onrender.com';
+interface Tool {
+  id: string;
+  name: string;
+  description: string;
+  icon: React.ReactNode;
+  category: 'search' | 'billing' | 'ticket' | 'ocr' | 'email' | 'general';
+  parameters?: Array<{
+    name: string;
+    type: string;
+    required?: boolean;
+    description?: string;
+  }> | Record<string, string>;
+  endpoint?: string;
+}
+
+interface ConversationHistory {
+  id: string;
+  title: string;
+  preview: string;
+  timestamp: Date;
+  messageCount: number;
+  messages?: Message[]; // Add messages property
+}
+
+const API_URL = 'http://localhost:4000';
 
 export default function ChatInterface() {
-  const [activeTab, setActiveTab] = useState<'chat' | 'guardrails' | 'evals' | 'email'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'guardrails' | 'evals' | 'email' | 'tools' | 'history'>('chat');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -96,6 +121,22 @@ export default function ChatInterface() {
   const [bulkEmails, setBulkEmails] = useState<string>('');
   const [showBulkInput, setShowBulkInput] = useState(false);
   
+  // Tools states
+  const [availableTools, setAvailableTools] = useState<Tool[]>([]);
+  const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
+  const [toolParameters, setToolParameters] = useState<Record<string, string>>({});
+  const [toolResult, setToolResult] = useState<any>(null);
+  const [isExecutingTool, setIsExecutingTool] = useState(false);
+  
+  // History states
+  const [conversations, setConversations] = useState<ConversationHistory[]>([]);
+  const [selectedConversation, setSelectedConversation] = useState<ConversationHistory | null>(null);
+  const [conversationMessages, setConversationMessages] = useState<Message[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  
+  // Add state to track current conversation ID
+  const [currentConversationId, setCurrentConversationId] = useState<string>('chat-001');
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -106,6 +147,100 @@ export default function ChatInterface() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Helper function to get icon based on tool ID
+  const getToolIcon = (toolId: string) => {
+    switch (toolId) {
+      case 'kb-search': return <Search className="w-5 h-5" />;
+      case 'invoice-lookup': return <FileText className="w-5 h-5" />;
+      case 'billing-refund': return <CreditCard className="w-5 h-5" />;
+      case 'create-ticket': return <Ticket className="w-5 h-5" />;
+      case 'ocr-screenshot': return <Image className="w-5 h-5" />;
+      case 'billing-kb': return <Database className="w-5 h-5" />;
+      case 'send-gmail': return <Mail className="w-5 h-5" />;
+      default: return <Wrench className="w-5 h-5" />;
+    }
+  };
+
+  // Default tools configuration
+  const getDefaultTools = (): Tool[] => {
+    return [
+      {
+        id: 'kb-search',
+        name: 'Knowledge Base Search',
+        description: 'Search for solutions to the knowledgebase parameters',
+        icon: getToolIcon('kb-search'),
+        category: 'search',
+        parameters: [
+          { name: 'query', type: 'string', required: true, description: 'Search query string' }
+        ]
+      },
+      {
+        id: 'invoice-lookup',
+        name: 'Market Lacking',
+        description: 'Find a trade information by invoice ID',
+        icon: getToolIcon('invoice-lookup'),
+        category: 'billing',
+        parameters: [
+          { name: 'invoiceId', type: 'string', required: true, description: 'Invoice identifier' },
+          { name: 'trusted', type: 'string', required: false, description: 'Trusted string' }
+        ]
+      },
+      {
+        id: 'create-ticket',
+        name: 'Create Support Task+',
+        description: 'Create a new support task',
+        icon: getToolIcon('create-ticket'),
+        category: 'ticket',
+        parameters: [
+          { name: 'issue', type: 'string', required: true, description: 'Issue description' },
+          { name: 'priority', type: 'string', required: false, description: 'Priority level' }
+        ]
+      },
+      {
+        id: 'ocr-screenshot',
+        name: 'OCS Screenshot',
+        description: 'Create that time uploaded screenshots',
+        icon: getToolIcon('ocr-screenshot'),
+        category: 'ocr',
+        parameters: [
+          { name: 'imageBase64', type: 'string', required: true, description: 'Base64 encoded image' }
+        ]
+      },
+      {
+        id: 'status-knowledge',
+        name: 'Status Knowledge',
+        description: 'Search listing-related knowledge',
+        icon: getToolIcon('kb-search'),
+        category: 'search',
+        parameters: [
+          { name: 'query', type: 'string', required: true, description: 'Search query string' }
+        ]
+      },
+      {
+        id: 'send-gmail',
+        name: 'Sort Email',
+        description: 'Send emails via Cloud',
+        icon: getToolIcon('send-gmail'),
+        category: 'email',
+        parameters: [
+          { name: 'to', type: 'email', required: true, description: 'Recipient email' },
+          { name: 'subject', type: 'string', required: true, description: 'Email subject' },
+          { name: 'body', type: 'string', required: true, description: 'Email body' }
+        ]
+      },
+      {
+        id: 'billing-refund',
+        name: 'Related Check',
+        description: 'Create client interface and status',
+        icon: getToolIcon('billing-refund'),
+        category: 'billing',
+        parameters: [
+          { name: 'orderId', type: 'string', required: false, description: 'Order identifier' }
+        ]
+      }
+    ];
+  };
 
   // Check backend connection on mount
   useEffect(() => {
@@ -143,6 +278,158 @@ export default function ChatInterface() {
       loadEmailTemplates();
     }
   }, [activeTab]);
+
+  // Load tools from backend when tools tab is active
+  useEffect(() => {
+    if (activeTab === 'tools') {
+      loadTools();
+    }
+  }, [activeTab]);
+
+  // Load conversations when history tab is active
+  useEffect(() => {
+    if (activeTab === 'history') {
+      loadAllConversations();
+    }
+  }, [activeTab]);
+
+  // Load initial conversation messages when component mounts
+  useEffect(() => {
+    loadInitialConversation();
+  }, []);
+
+  const loadInitialConversation = async () => {
+    try {
+      // Load a default conversation when the app starts
+      const response = await fetch(`${API_URL}/history/chat-001`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.ok && Array.isArray(data.history)) {
+          const historyMessages: Message[] = data.history.map((msg: any) => ({
+            id: msg.id || Date.now().toString(),
+            role: msg.role === 'user' ? 'user' : 'assistant',
+            content: msg.content || '',
+            timestamp: new Date(msg.created_at || Date.now())
+          }));
+          setMessages(historyMessages);
+          setConversationMessages(historyMessages);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load initial conversation:', error);
+    }
+  };
+
+  const loadTools = async () => {
+    try {
+      const response = await fetch(`${API_URL}/tools`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.ok && Array.isArray(data.tools)) {
+          const formattedTools = data.tools.map((tool: any) => {
+            let parameters = [];
+            
+            if (Array.isArray(tool.parameters)) {
+              parameters = tool.parameters;
+            } else if (typeof tool.parameters === 'object' && tool.parameters !== null) {
+              parameters = Object.entries(tool.parameters).map(([name, type]) => ({
+                name,
+                type: String(type),
+                required: true
+              }));
+            }
+            
+            return {
+              ...tool,
+              icon: getToolIcon(tool.id),
+              parameters,
+              category: tool.category || 'general'
+            };
+          });
+          
+          setAvailableTools(formattedTools);
+        } else {
+          setAvailableTools(getDefaultTools());
+        }
+      } else {
+        setAvailableTools(getDefaultTools());
+      }
+    } catch (error) {
+      console.error('Failed to load tools:', error);
+      setAvailableTools(getDefaultTools());
+    }
+  };
+
+  const loadAllConversations = async () => {
+    try {
+      const response = await fetch(`${API_URL}/history?userId=user-123`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.ok && Array.isArray(data.conversations)) {
+          const loadedConversations: ConversationHistory[] = data.conversations.map((conv: any) => ({
+            id: conv.id,
+            title: conv.title || `Conversation ${conv.id}`,
+            preview: conv.last_message || `Conversation with ${conv.message_count || 0} messages`,
+            timestamp: new Date(conv.last_activity || conv.created_at || conv.updated_at || Date.now()),
+            messageCount: conv.message_count || 0
+          }));
+          setConversations(loadedConversations);
+        } else {
+          // Fallback to mock data
+          setConversations([
+            {
+              id: 'chat-001',
+              title: 'Billing Issue Discussion',
+              preview: 'I need help with my invoice payment...',
+              timestamp: new Date('2024-01-15T10:30:00'),
+              messageCount: 12
+            },
+            {
+              id: 'chat-002',
+              title: 'Technical Support',
+              preview: 'The app keeps crashing on startup...',
+              timestamp: new Date('2024-01-14T14:20:00'),
+              messageCount: 8
+            },
+            {
+              id: 'chat-003',
+              title: 'Refund Status Inquiry',
+              preview: 'When will I receive my refund?',
+              timestamp: new Date('2024-01-13T09:15:00'),
+              messageCount: 6
+            }
+          ]);
+        }
+      } else {
+        throw new Error('Failed to load conversations');
+      }
+    } catch (error) {
+      console.error('Failed to load conversations:', error);
+      setConversations([
+        {
+          id: 'chat-001',
+          title: 'Billing Issue Discussion',
+          preview: 'I need help with my invoice payment...',
+          timestamp: new Date('2024-01-15T10:30:00'),
+          messageCount: 12
+        },
+        {
+          id: 'chat-002',
+          title: 'Technical Support',
+          preview: 'The app keeps crashing on startup...',
+          timestamp: new Date('2024-01-14T14:20:00'),
+          messageCount: 8
+        },
+        {
+          id: 'chat-003',
+          title: 'Refund Status Inquiry',
+          preview: 'When will I receive my refund?',
+          timestamp: new Date('2024-01-13T09:15:00'),
+          messageCount: 6
+        }
+      ]);
+    }
+  };
 
   const loadBannedWords = async () => {
     try {
@@ -201,6 +488,184 @@ export default function ChatInterface() {
     } finally {
       setIsLoadingTemplates(false);
     }
+  };
+
+  const loadConversationHistory = async (conversationId: string) => {
+    setIsLoadingHistory(true);
+    try {
+      const response = await fetch(`${API_URL}/history/${conversationId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.ok && Array.isArray(data.history)) {
+          const historyMessages: Message[] = data.history.map((msg: any) => ({
+            id: msg.id || Date.now().toString(),
+            role: msg.role === 'user' ? 'user' : 'assistant',
+            content: msg.content || '',
+            timestamp: new Date(msg.created_at || Date.now())
+          }));
+          setConversationMessages(historyMessages);
+          
+          // Store the loaded messages in the conversation object for later use
+          setConversations(prev => prev.map(conv => 
+            conv.id === conversationId 
+              ? { ...conv, messages: historyMessages } 
+              : conv
+          ));
+          
+          // Also update the selected conversation
+          setSelectedConversation(prev => prev ? { 
+            ...prev, 
+            messages: historyMessages 
+          } : null);
+        } else {
+          console.error('History data is not an array:', data);
+          setConversationMessages([]);
+        }
+      } else {
+        throw new Error('Failed to load history');
+      }
+    } catch (error) {
+      console.error('Failed to load conversation history:', error);
+      setConversationMessages([
+        {
+          id: '1',
+          role: 'user',
+          content: selectedConversation?.preview || 'Hello, I need assistance...',
+          timestamp: selectedConversation?.timestamp || new Date()
+        },
+        {
+          id: '2',
+          role: 'assistant',
+          content: 'I understand your issue. Let me help you with that. How can I assist you today?',
+          timestamp: new Date()
+        },
+        {
+          id: '3',
+          role: 'user',
+          content: 'Specifically, I need help with billing and invoice related questions.',
+          timestamp: new Date()
+        },
+        {
+          id: '4',
+          role: 'assistant',
+          content: 'I can definitely help with billing questions! Please provide your invoice number or tell me what specific billing issue you\'re facing.',
+          timestamp: new Date()
+        }
+      ]);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  // NEW FUNCTION: Load conversation into chat
+  const loadConversationIntoChat = async (conversationId: string) => {
+    try {
+      const response = await fetch(`${API_URL}/history/${conversationId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.ok && Array.isArray(data.history)) {
+          const historyMessages: Message[] = data.history.map((msg: any) => ({
+            id: msg.id || Date.now().toString(),
+            role: msg.role === 'user' ? 'user' : 'assistant',
+            content: msg.content || '',
+            timestamp: new Date(msg.created_at || Date.now())
+          }));
+          
+          // Set the messages in the chat interface
+          setMessages(historyMessages);
+          setCurrentConversationId(conversationId);
+          
+          // Find the conversation in our list
+          const conversation = conversations.find(c => c.id === conversationId);
+          if (conversation) {
+            setSelectedConversation(conversation);
+          }
+          
+          // Switch to chat tab
+          setActiveTab('chat');
+          
+          // Scroll to bottom
+          setTimeout(() => {
+            scrollToBottom();
+          }, 100);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load conversation into chat:', error);
+      // Fallback to mock messages
+      setMessages([
+        {
+          id: '1',
+          role: 'user',
+          content: 'Hello, I need help with my invoice...',
+          timestamp: new Date('2024-01-15T10:30:00')
+        },
+        {
+          id: '2',
+          role: 'assistant',
+          content: 'I understand your concern about the invoice. Let me check the details for you.',
+          timestamp: new Date('2024-01-15T10:31:00')
+        },
+        {
+          id: '3',
+          role: 'user',
+          content: 'The invoice number is INV-001. When will it be processed?',
+          timestamp: new Date('2024-01-15T10:32:00')
+        },
+        {
+          id: '4',
+          role: 'assistant',
+          content: 'Your invoice INV-001 is currently pending. It should be processed within 3-5 business days.',
+          timestamp: new Date('2024-01-15T10:33:00')
+        }
+      ]);
+      setActiveTab('chat');
+    }
+  };
+
+  const executeTool = async () => {
+    if (!selectedTool) return;
+    
+    setIsExecutingTool(true);
+    setToolResult(null);
+    
+    try {
+      const response = await fetch(`${API_URL}/tools/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          toolId: selectedTool.id,
+          parameters: toolParameters
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.ok) {
+        setToolResult(data);
+      } else {
+        setToolResult({
+          success: false,
+          error: data.error || 'Failed to execute tool',
+          timestamp: new Date().toISOString()
+        });
+      }
+    } catch (error) {
+      console.error('Tool execution error:', error);
+      setToolResult({
+        success: false,
+        error: 'Network error. Please check your connection.',
+        timestamp: new Date().toISOString()
+      });
+    } finally {
+      setIsExecutingTool(false);
+    }
+  };
+
+  const clearToolExecution = () => {
+    setSelectedTool(null);
+    setToolParameters({});
+    setToolResult(null);
   };
 
   const addBannedWord = async () => {
@@ -266,7 +731,6 @@ export default function ChatInterface() {
     let subject = template.subject;
     let body = template.body;
     
-    // Apply any existing variables
     Object.keys(templateVariables).forEach(key => {
       const value = templateVariables[key];
       subject = subject.replace(`{${key}}`, value);
@@ -278,7 +742,6 @@ export default function ChatInterface() {
     setSelectedTemplate(templateName);
     setShowTemplatePlaceholders(true);
     
-    // Initialize variables for this template
     const newVariables: Record<string, string> = {};
     template.placeholders.forEach(placeholder => {
       if (!templateVariables[placeholder]) {
@@ -291,7 +754,6 @@ export default function ChatInterface() {
   const updateTemplateVariable = (key: string, value: string) => {
     setTemplateVariables(prev => ({ ...prev, [key]: value }));
     
-    // Update subject and body with new variable
     const template = emailTemplates[selectedTemplate];
     if (template) {
       let newSubject = template.subject;
@@ -317,7 +779,6 @@ export default function ChatInterface() {
   const sendEmail = async () => {
     let recipients = [emailTo.trim()];
     
-    // Handle bulk emails
     if (showBulkInput && bulkEmails.trim()) {
       recipients = bulkEmails
         .split(/[\n,;]/)
@@ -330,7 +791,6 @@ export default function ChatInterface() {
       }
     }
     
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const invalidEmails = recipients.filter(email => !emailRegex.test(email));
     
@@ -355,7 +815,6 @@ export default function ChatInterface() {
         body: emailBody.trim(),
       };
 
-      // If multiple recipients, use bulk endpoint
       if (recipients.length > 1) {
         payload.emails = recipients;
       }
@@ -377,7 +836,6 @@ export default function ChatInterface() {
         
         setEmailSuccess(successMessage);
         
-        // Add to history
         const newEmail: EmailHistory = {
           id: Date.now().toString(),
           to: recipients.length > 1 ? `${recipients[0]} (+${recipients.length - 1} more)` : recipients[0],
@@ -388,9 +846,8 @@ export default function ChatInterface() {
           response: data
         };
         
-        setEmailHistory(prev => [newEmail, ...prev.slice(0, 9)]); // Keep last 10
+        setEmailHistory(prev => [newEmail, ...prev.slice(0, 9)]);
         
-        // Clear form if single email
         if (recipients.length === 1) {
           setEmailTo('');
           setEmailSubject('');
@@ -402,7 +859,6 @@ export default function ChatInterface() {
       } else {
         setEmailError(data.error || 'Failed to send email');
         
-        // Add failed attempt to history
         const failedEmail: EmailHistory = {
           id: Date.now().toString(),
           to: recipients.length > 1 ? `${recipients.length} recipients` : recipients[0],
@@ -537,11 +993,11 @@ export default function ChatInterface() {
         }
       }
 
-      const payload: any = {};
-      
-      if (currentText.trim()) {
-        payload.text = currentText;
-      }
+      const payload: any = {
+        text: currentText,
+        conversationId: currentConversationId,
+        userId: 'user-123'
+      };
 
       if (imageBase64) {
         payload.imageBase64 = imageBase64;
@@ -571,6 +1027,9 @@ export default function ChatInterface() {
         };
         setMessages((prev) => [...prev, assistantMessage]);
         setIsConnected(true);
+        
+        // Update conversation list with new message
+        await loadAllConversations();
       } else {
         throw new Error(data.error || 'No response from assistant');
       }
@@ -628,6 +1087,36 @@ export default function ChatInterface() {
           >
             <MessageSquare className="w-5 h-5" />
             <span>Chat Interface</span>
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('tools')}
+            className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200 font-medium text-sm ${
+              activeTab === 'tools'
+                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/30 scale-[1.02]'
+                : 'text-slate-700 hover:bg-slate-100/80'
+            }`}
+          >
+            <Wrench className="w-5 h-5" />
+            <span>Tools</span>
+            <span className="ml-auto bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+              {availableTools.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200 font-medium text-sm ${
+              activeTab === 'history'
+                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-500/30 scale-[1.02]'
+                : 'text-slate-700 hover:bg-slate-100/80'
+            }`}
+          >
+            <History className="w-5 h-5" />
+            <span>History</span>
+            <span className="ml-auto bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+              {conversations.length}
+            </span>
           </button>
           
           <button
@@ -701,12 +1190,37 @@ export default function ChatInterface() {
         {activeTab === 'chat' && (
           <>
             <div className="bg-white/80 backdrop-blur-xl border-b border-slate-200/60 px-8 py-5 shadow-sm">
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-blue-900 bg-clip-text text-transparent">
-                Support Chat
-              </h1>
-              <p className="text-sm text-slate-600 mt-1.5 font-medium">
-                Get help with billing and technical issues
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-blue-900 bg-clip-text text-transparent">
+                    Support Chat
+                  </h1>
+                  <p className="text-sm text-slate-600 mt-1.5 font-medium">
+                    Get help with billing and technical issues
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 font-medium">
+                    Conversation ID:
+                  </span>
+                  <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
+                    {currentConversationId}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      // Create new conversation
+                      const newId = `chat-${Date.now()}`;
+                      setCurrentConversationId(newId);
+                      setMessages([]);
+                      await loadAllConversations();
+                    }}
+                    className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-medium bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-lg transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                    New Chat
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
@@ -722,6 +1236,7 @@ export default function ChatInterface() {
                     <p className="text-sm text-slate-600 mb-4">
                       Ask me about billing issues, technical problems, or upload screenshots.
                     </p>
+            
                   </div>
                   {isConnected === false && (
                     <div className="bg-red-50 border border-red-200 rounded-xl p-4 max-w-md mx-auto mt-6">
@@ -849,6 +1364,577 @@ export default function ChatInterface() {
               <p className="text-xs text-slate-500 mt-3 px-1 font-medium">
                 Press Enter to send • Shift+Enter for new line
               </p>
+            </div>
+          </>
+        )}
+
+        {activeTab === 'tools' && (
+          <>
+            <div className="bg-white/80 backdrop-blur-xl border-b border-slate-200/60 px-8 py-5 shadow-sm">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center shadow-lg">
+                  <Wrench className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-blue-900 bg-clip-text text-transparent">
+                    Tools Dashboard
+                  </h1>
+                  <p className="text-sm text-slate-600 mt-1 font-medium">
+                    Execute and manage available tools
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-8 py-6">
+              <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Left Column: Available Tools */}
+                <div className="lg:col-span-2">
+                  <div className="bg-white rounded-2xl border border-slate-200/60 shadow-lg overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-xl font-bold text-slate-900">
+                            Available Tools ({availableTools.length})
+                          </h2>
+                          <p className="text-sm text-slate-600 mt-1">
+                            Select a tool to execute with parameters
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-slate-600">Categories:</span>
+                          <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">Search</span>
+                          <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full">Billing</span>
+                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">Ticket</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="divide-y divide-slate-200/60">
+                      {availableTools.length === 0 ? (
+                        <div className="px-6 py-16 text-center text-slate-500">
+                          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
+                          <p className="text-base font-semibold text-slate-700">Loading tools...</p>
+                        </div>
+                      ) : (
+                        availableTools.map((tool) => (
+                          <div
+                            key={tool.id}
+                            className={`px-6 py-4 flex items-start gap-4 transition-colors cursor-pointer ${
+                              selectedTool?.id === tool.id
+                                ? 'bg-blue-50 border-l-4 border-blue-600'
+                                : 'hover:bg-slate-50/80'
+                            }`}
+                            onClick={() => {
+                              setSelectedTool(tool);
+                              setToolParameters({});
+                              setToolResult(null);
+                            }}
+                          >
+                            <div className={`flex-shrink-0 w-12 h-12 rounded-xl flex items-center justify-center ${
+                              selectedTool?.id === tool.id
+                                ? 'bg-blue-100 text-blue-600'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {tool.icon}
+                            </div>
+                            
+                            <div className="flex-1">
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <h3 className="font-bold text-slate-900 text-[15px]">
+                                    {tool.name}
+                                  </h3>
+                                  <p className="text-sm text-slate-600 mt-1">
+                                    {tool.description}
+                                  </p>
+                                </div>
+                                <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                                  tool.category === 'billing' ? 'bg-purple-100 text-purple-700' :
+                                  tool.category === 'search' ? 'bg-emerald-100 text-emerald-700' :
+                                  tool.category === 'ticket' ? 'bg-amber-100 text-amber-700' :
+                                  tool.category === 'ocr' ? 'bg-blue-100 text-blue-700' :
+                                  tool.category === 'email' ? 'bg-red-100 text-red-700' :
+                                  'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {tool.category}
+                                </span>
+                              </div>
+                              
+                              {tool.parameters && Array.isArray(tool.parameters) && tool.parameters.length > 0 && (
+                                <div className="mt-3">
+                                  <p className="text-xs font-semibold text-slate-700 mb-1">
+                                    Parameters:
+                                  </p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {tool.parameters.map((param, index) => (
+                                      <span
+                                        key={index}
+                                        className="text-xs bg-slate-100 text-slate-700 px-2 py-1 rounded-lg flex items-center gap-1"
+                                      >
+                                        <Key className="w-3 h-3" />
+                                        <span className="font-medium">{param.name}</span>
+                                        <Tag className="w-3 h-3" />
+                                        <span className="text-slate-500">{param.type}</span>
+                                        {param.required && (
+                                          <span className="text-red-500 text-xs">*</span>
+                                        )}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            
+                            <ChevronRight className={`w-5 h-5 text-slate-400 flex-shrink-0 mt-2 ${
+                              selectedTool?.id === tool.id ? 'text-blue-600' : ''
+                            }`} />
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Tool Execution */}
+                <div className="space-y-6">
+                  <div className="bg-white rounded-2xl border border-slate-200/60 shadow-lg overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50">
+                      <h3 className="text-lg font-bold text-slate-900">
+                        {selectedTool ? `Execute: ${selectedTool.name}` : 'Tool Execution'}
+                      </h3>
+                    </div>
+                    
+                    <div className="p-6">
+                      {selectedTool ? (
+                        <div className="space-y-6">
+                          {/* Parameters Form */}
+                          <div>
+                            <label className="block text-sm font-bold text-slate-700 mb-3">
+                              Parameters
+                            </label>
+                            
+                            {selectedTool.parameters && Array.isArray(selectedTool.parameters) && 
+                              selectedTool.parameters.map((param, index) => (
+                                <div key={index} className="mb-3">
+                                  <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                                    {param.name} 
+                                    {param.required && <span className="text-red-500 ml-1">*</span>}
+                                    <span className="text-slate-400 ml-1">({param.type})</span>
+                                    {param.description && (
+                                      <span className="text-slate-500 text-xs block mt-1">{param.description}</span>
+                                    )}
+                                  </label>
+                                  <input
+                                    type={param.type === 'email' ? 'email' : 'text'}
+                                    value={toolParameters[param.name] || ''}
+                                    onChange={(e) => setToolParameters(prev => ({
+                                      ...prev,
+                                      [param.name]: e.target.value
+                                    }))}
+                                    placeholder={`Enter ${param.name}`}
+                                    disabled={isExecutingTool}
+                                    required={param.required}
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-100"
+                                  />
+                                </div>
+                              ))
+                            }
+                            
+                            {(!selectedTool.parameters || 
+                              (Array.isArray(selectedTool.parameters) && selectedTool.parameters.length === 0)) && (
+                              <div className="text-center py-4 text-slate-500">
+                                <p className="text-sm">This tool has no parameters</p>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex gap-3 pt-4 border-t border-slate-200">
+                            <button
+                              onClick={executeTool}
+                              disabled={isExecutingTool}
+                              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 disabled:opacity-50 font-semibold shadow-lg shadow-blue-500/30"
+                            >
+                              {isExecutingTool ? (
+                                <>
+                                  <Loader2 className="w-5 h-5 animate-spin" />
+                                  <span>Executing...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-5 h-5" />
+                                  <span>Execute Tool</span>
+                                </>
+                              )}
+                            </button>
+                            
+                            <button
+                              onClick={clearToolExecution}
+                              className="px-4 py-3 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl transition-colors font-medium"
+                            >
+                              Clear
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-slate-500">
+                          <Wrench className="w-16 h-16 mx-auto mb-4 text-slate-400" />
+                          <p className="text-base font-semibold text-slate-700">
+                            No tool selected
+                          </p>
+                          <p className="text-sm mt-2">
+                            Select a tool from the list to execute
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Tool Results */}
+                  {toolResult && (
+                    <div className="bg-white rounded-2xl border border-slate-200/60 shadow-lg overflow-hidden">
+                      <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50 flex items-center justify-between">
+                        <h3 className="text-lg font-bold text-slate-900">Execution Results</h3>
+                        <button
+                          onClick={() => copyToClipboard(JSON.stringify(toolResult, null, 2))}
+                          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                        >
+                          <Copy className="w-4 h-4" />
+                          Copy JSON
+                        </button>
+                      </div>
+                      
+                      <div className="p-6">
+                        <div className={`flex items-center gap-2 mb-4 p-3 rounded-xl ${
+                          toolResult.success
+                            ? 'bg-emerald-50 border border-emerald-200'
+                            : 'bg-red-50 border border-red-200'
+                        }`}>
+                          {toolResult.success ? (
+                            <CheckCircle className="w-5 h-5 text-emerald-600" />
+                          ) : (
+                            <AlertCircle className="w-5 h-5 text-red-600" />
+                          )}
+                          <span className={`font-bold ${
+                            toolResult.success ? 'text-emerald-700' : 'text-red-700'
+                          }`}>
+                            {toolResult.success ? 'Tool executed successfully' : 'Tool execution failed'}
+                          </span>
+                        </div>
+                        
+                        <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
+                          <pre className="text-sm text-slate-900 whitespace-pre-wrap overflow-auto max-h-96">
+                            {JSON.stringify(toolResult.data || toolResult.error || toolResult, null, 2)}
+                          </pre>
+                        </div>
+                        
+                        <div className="mt-4 flex items-center justify-between text-xs text-slate-500">
+                          <span>
+                            Executed at: {new Date().toLocaleTimeString()}
+                          </span>
+                          <span>
+                            Tool: {selectedTool?.name}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tool Statistics */}
+                  <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl p-5 text-white shadow-lg">
+                    <h3 className="text-lg font-bold mb-4">Tool Stats</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Wrench className="w-4 h-4" />
+                          <span className="text-sm">Total Tools</span>
+                        </div>
+                        <span className="text-xl font-bold">{availableTools.length}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Play className="w-4 h-4" />
+                          <span className="text-sm">Executed Today</span>
+                        </div>
+                        <span className="text-xl font-bold">
+                          {toolResult ? 1 : 0}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="w-4 h-4" />
+                          <span className="text-sm">Success Rate</span>
+                        </div>
+                        <span className="text-xl font-bold">
+                          {toolResult?.success ? '100%' : '0%'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {activeTab === 'history' && (
+          <>
+            <div className="bg-white/80 backdrop-blur-xl border-b border-slate-200/60 px-8 py-5 shadow-sm">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center shadow-lg">
+                  <History className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-blue-900 bg-clip-text text-transparent">
+                    Conversation History
+                  </h1>
+                  <p className="text-sm text-slate-600 mt-1 font-medium">
+                    View and manage past conversations
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-8 py-6">
+              <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Left Column: Conversation List */}
+                <div className="lg:col-span-1">
+                  <div className="bg-white rounded-2xl border border-slate-200/60 shadow-lg overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-bold text-slate-900">
+                          Conversations ({conversations.length})
+                        </h2>
+                        <button className="p-2 text-slate-600 hover:bg-slate-100 rounded-xl">
+                          <Filter className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="max-h-[600px] overflow-y-auto divide-y divide-slate-200/60">
+                      {conversations.length === 0 ? (
+                        <div className="px-6 py-16 text-center text-slate-500">
+                          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
+                          <p className="text-base font-semibold text-slate-700">Loading conversations...</p>
+                        </div>
+                      ) : (
+                        conversations.map((conversation) => (
+                          <div
+                            key={conversation.id}
+                            className={`px-6 py-4 cursor-pointer transition-colors ${
+                              selectedConversation?.id === conversation.id
+                                ? 'bg-blue-50 border-l-4 border-blue-600'
+                                : 'hover:bg-slate-50/80'
+                            }`}
+                            onClick={() => {
+                              setSelectedConversation(conversation);
+                              loadConversationHistory(conversation.id);
+                            }}
+                          >
+                            <div className="flex items-start justify-between mb-2">
+                              <h3 className="font-bold text-slate-900 text-[15px] line-clamp-1">
+                                {conversation.title}
+                              </h3>
+                              <span className="text-xs text-slate-500">
+                                {conversation.timestamp.toLocaleDateString()}
+                              </span>
+                            </div>
+                            
+                            <p className="text-sm text-slate-600 line-clamp-2 mb-2">
+                              {conversation.preview}
+                            </p>
+                            
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-4 text-xs">
+                                <span className="text-slate-500">
+                                  {conversation.timestamp.toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </span>
+                                <span className="text-slate-500">
+                                  {conversation.messageCount} messages
+                                </span>
+                              </div>
+                              <ChevronRight className={`w-4 h-4 text-slate-400 ${
+                                selectedConversation?.id === conversation.id ? 'text-blue-600' : ''
+                              }`} />
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Conversation Detail */}
+                <div className="lg:col-span-2">
+                  <div className="bg-white rounded-2xl border border-slate-200/60 shadow-lg overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-xl font-bold text-slate-900">
+                            {selectedConversation ? selectedConversation.title : 'Conversation Details'}
+                          </h2>
+                          {selectedConversation && (
+                            <p className="text-sm text-slate-600 mt-1">
+                              {selectedConversation.timestamp.toLocaleDateString()} • {selectedConversation.messageCount} messages
+                            </p>
+                          )}
+                        </div>
+                        {selectedConversation && (
+                          <button
+                            onClick={() => loadConversationIntoChat(selectedConversation.id)}
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors font-medium"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                            Continue Chat
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="p-6">
+                      {isLoadingHistory ? (
+                        <div className="flex items-center justify-center py-16">
+                          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                        </div>
+                      ) : selectedConversation ? (
+                        <div className="space-y-4 max-h-[500px] overflow-y-auto">
+                          {conversationMessages.length === 0 ? (
+                            <div className="text-center py-16 text-slate-500">
+                              <History className="w-16 h-16 mx-auto mb-4 text-slate-400" />
+                              <p className="text-base font-semibold text-slate-700">
+                                No messages found
+                              </p>
+                              <p className="text-sm mt-2">
+                                This conversation appears to be empty
+                              </p>
+                            </div>
+                          ) : (
+                            conversationMessages.map((message) => (
+                              <div
+                                key={message.id}
+                                className={`flex ${
+                                  message.role === 'user' ? 'justify-end' : 'justify-start'
+                                }`}
+                              >
+                                <div
+                                  className={`max-w-[80%] rounded-xl px-4 py-3 ${
+                                    message.role === 'user'
+                                      ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white'
+                                      : 'bg-slate-100 text-slate-900 border border-slate-200'
+                                  }`}
+                                >
+                                  <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                                    {message.content}
+                                  </p>
+                                  <p
+                                    className={`text-xs mt-1.5 font-medium ${
+                                      message.role === 'user'
+                                        ? 'text-blue-200'
+                                        : 'text-slate-500'
+                                    }`}
+                                  >
+                                    {message.timestamp.toLocaleTimeString([], {
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                    })}
+                                  </p>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-center py-16 text-slate-500">
+                          <History className="w-16 h-16 mx-auto mb-4 text-slate-400" />
+                          <p className="text-base font-semibold text-slate-700">
+                            No conversation selected
+                          </p>
+                          <p className="text-sm mt-2">
+                            Select a conversation from the list to view details
+                          </p>
+                        </div>
+                      )}
+                      
+                      {selectedConversation && conversationMessages.length > 0 && (
+                        <div className="mt-6 pt-6 border-t border-slate-200">
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm text-slate-600">
+                              <span className="font-medium">Total messages:</span> {conversationMessages.length}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => copyToClipboard(conversationMessages.map(m => 
+                                  `${m.role}: ${m.content}`
+                                ).join('\n\n'))}
+                                className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-xl transition-colors font-medium"
+                              >
+                                <Copy className="w-4 h-4" />
+                                Copy Conversation
+                              </button>
+                              <button
+                                onClick={() => loadConversationIntoChat(selectedConversation.id)}
+                                className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors font-medium"
+                              >
+                                <MessageSquare className="w-4 h-4" />
+                                Continue Chat
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Statistics */}
+                  {selectedConversation && (
+                    <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-white rounded-2xl border border-slate-200/60 p-5 shadow-lg">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
+                            <MessageSquare className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <p className="text-sm font-semibold text-slate-600">Messages</p>
+                        </div>
+                        <p className="text-3xl font-bold text-slate-900">{conversationMessages.length}</p>
+                      </div>
+
+                      <div className="bg-white rounded-2xl border border-slate-200/60 p-5 shadow-lg">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">
+                            <Calendar className="w-5 h-5 text-emerald-600" />
+                          </div>
+                          <p className="text-sm font-semibold text-slate-600">Duration</p>
+                        </div>
+                        <p className="text-3xl font-bold text-emerald-600">
+                          {conversationMessages.length > 1 
+                            ? `${Math.round(
+                                (conversationMessages[conversationMessages.length - 1].timestamp.getTime() - 
+                                 conversationMessages[0].timestamp.getTime()) / 60000
+                              )}m` 
+                            : '0m'
+                          }
+                        </p>
+                      </div>
+
+                      <div className="bg-white rounded-2xl border border-slate-200/60 p-5 shadow-lg">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
+                            <Users className="w-5 h-5 text-purple-600" />
+                          </div>
+                          <p className="text-sm font-semibold text-slate-600">User Messages</p>
+                        </div>
+                        <p className="text-3xl font-bold text-purple-600">
+                          {conversationMessages.filter(m => m.role === 'user').length}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </>
         )}
