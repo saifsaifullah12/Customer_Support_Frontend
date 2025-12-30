@@ -5,7 +5,7 @@ import { Send, Paperclip, X, Loader2, Shield, MessageSquare, Plus, Trash2,
   AlertCircle, BarChart3, CheckCircle, XCircle, TrendingUp, Mail, BookOpen, 
   RefreshCw, Users, Download, Copy, Info, Clock, ExternalLink, ChevronRight, 
   Filter, Wrench, History, Settings, FileText, Search, Image, CreditCard, 
-  Ticket, Database, Eye, Play, StopCircle, Calendar, Key, Tag } from 'lucide-react';
+  Ticket, Database, Eye, Play, StopCircle, Calendar, Key, Tag, Reply, Circle, CircleCheck } from 'lucide-react';
 
 interface Message {
   id: string;
@@ -40,6 +40,17 @@ interface EmailHistory {
   sentAt: Date;
   status: 'sent' | 'failed';
   response?: any;
+}
+
+interface InboxEmail {
+  id: string;
+  threadId: string;
+  from: string;
+  subject: string;
+  snippet: string;
+  date: string;
+  unread: boolean;
+  body: string;
 }
 
 interface EmailTemplate {
@@ -78,10 +89,10 @@ interface ConversationHistory {
   preview: string;
   timestamp: Date;
   messageCount: number;
-  messages?: Message[]; // Add messages property
+  messages?: Message[];
 }
 
-const API_URL = 'https://customer-support-backend-nspr.onrender.com';
+const API_URL = 'http://localhost:4000';
 
 export default function ChatInterface() {
   const [activeTab, setActiveTab] = useState<'chat' | 'guardrails' | 'evals' | 'email' | 'tools' | 'history'>('chat');
@@ -112,6 +123,8 @@ export default function ChatInterface() {
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailHistory, setEmailHistory] = useState<EmailHistory[]>([]);
+  const [inboxEmails, setInboxEmails] = useState<InboxEmail[]>([]);
+  const [isLoadingInbox, setIsLoadingInbox] = useState(false);
   const [emailTemplates, setEmailTemplates] = useState<Record<string, EmailTemplate>>({});
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
@@ -120,6 +133,12 @@ export default function ChatInterface() {
   const [templateVariables, setTemplateVariables] = useState<Record<string, string>>({});
   const [bulkEmails, setBulkEmails] = useState<string>('');
   const [showBulkInput, setShowBulkInput] = useState(false);
+  
+  // Email selection and reply states
+  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
+  const [isReplying, setIsReplying] = useState(false);
+  const [replySuccess, setReplySuccess] = useState<string | null>(null);
+  const [replyError, setReplyError] = useState<string | null>(null);
   
   // Tools states
   const [availableTools, setAvailableTools] = useState<Tool[]>([]);
@@ -276,6 +295,7 @@ export default function ChatInterface() {
     if (activeTab === 'email') {
       loadEmailConfig();
       loadEmailTemplates();
+      loadInboxEmails();
     }
   }, [activeTab]);
 
@@ -490,6 +510,23 @@ export default function ChatInterface() {
     }
   };
 
+  const loadInboxEmails = async () => {
+    setIsLoadingInbox(true);
+    try {
+      const response = await fetch(`${API_URL}/inbox`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.ok && Array.isArray(data.emails)) {
+          setInboxEmails(data.emails);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load inbox emails:', error);
+    } finally {
+      setIsLoadingInbox(false);
+    }
+  };
+
   const loadConversationHistory = async (conversationId: string) => {
     setIsLoadingHistory(true);
     try {
@@ -557,7 +594,6 @@ export default function ChatInterface() {
     }
   };
 
-  // NEW FUNCTION: Load conversation into chat
   const loadConversationIntoChat = async (conversationId: string) => {
     try {
       const response = await fetch(`${API_URL}/history/${conversationId}`);
@@ -571,20 +607,16 @@ export default function ChatInterface() {
             timestamp: new Date(msg.created_at || Date.now())
           }));
           
-          // Set the messages in the chat interface
           setMessages(historyMessages);
           setCurrentConversationId(conversationId);
           
-          // Find the conversation in our list
           const conversation = conversations.find(c => c.id === conversationId);
           if (conversation) {
             setSelectedConversation(conversation);
           }
           
-          // Switch to chat tab
           setActiveTab('chat');
           
-          // Scroll to bottom
           setTimeout(() => {
             scrollToBottom();
           }, 100);
@@ -592,7 +624,6 @@ export default function ChatInterface() {
       }
     } catch (error) {
       console.error('Failed to load conversation into chat:', error);
-      // Fallback to mock messages
       setMessages([
         {
           id: '1',
@@ -879,6 +910,318 @@ export default function ChatInterface() {
     }
   };
 
+  // Handle email selection with radio button
+  const handleEmailSelect = (emailId: string) => {
+    setSelectedEmails(prev => {
+      if (prev.includes(emailId)) {
+        return prev.filter(id => id !== emailId);
+      } else {
+        return [...prev, emailId];
+      }
+    });
+  };
+
+  // Select all emails
+  const handleSelectAll = () => {
+    if (selectedEmails.length === inboxEmails.length) {
+      setSelectedEmails([]);
+    } else {
+      setSelectedEmails(inboxEmails.map(email => email.id));
+    }
+  };
+
+  // Generate and send AI replies to selected emails (for Email tab)
+  const generateAndSendReplies = async () => {
+    if (selectedEmails.length === 0) {
+      setReplyError('Please select at least one email to reply to');
+      return;
+    }
+
+    setIsReplying(true);
+    setReplyError(null);
+    setReplySuccess(null);
+
+    try {
+      const selectedEmailObjects = inboxEmails.filter(email => 
+        selectedEmails.includes(email.id)
+      );
+
+      let successCount = 0;
+      let errorMessages: string[] = [];
+
+      for (const email of selectedEmailObjects) {
+        try {
+          const fromMatch = email.from.match(/<([^>]+)>/);
+          const recipientEmail = fromMatch ? fromMatch[1] : email.from;
+
+          const emailContent = `
+Original Email:
+From: ${email.from}
+Subject: ${email.subject}
+Date: ${email.date}
+
+Content:
+${email.body}
+
+Please write a professional and appropriate reply to this email. Consider:
+1. Acknowledge the sender's message
+2. Address their concerns or questions
+3. Provide helpful information if needed
+4. End with a polite closing
+`;
+          
+          const aiResponse = await fetch(`${API_URL}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: `Generate a reply to this email: ${emailContent}`,
+              conversationId: currentConversationId,
+              userId: 'user-123',
+              context: {
+                emailReplyRequest: true,
+                originalEmail: {
+                  from: email.from,
+                  subject: email.subject,
+                  body: email.body
+                }
+              }
+            }),
+          });
+
+          const aiData = await aiResponse.json();
+
+          if (!aiResponse.ok || !aiData.text) {
+            throw new Error('Failed to generate AI reply');
+          }
+
+          const generatedReply = aiData.text;
+
+          const payload = {
+            thread_id: email.threadId,
+            body: generatedReply,
+            to: recipientEmail
+          };
+          
+          const replyResponse = await fetch(`${API_URL}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: JSON.stringify(payload),
+              conversationId: currentConversationId,
+              userId: 'user-123',
+              context: {
+                emailReplyRequest: true
+              }
+            }),
+          });
+
+          const replyData = await replyResponse.json();
+
+          if (replyResponse.ok && replyData.ok) {
+            successCount++;
+            
+            const newEmail: EmailHistory = {
+              id: Date.now().toString() + Math.random(),
+              to: recipientEmail,
+              subject: `Re: ${email.subject}`,
+              body: generatedReply,
+              sentAt: new Date(),
+              status: 'sent',
+              response: replyData
+            };
+            
+            setEmailHistory(prev => [newEmail, ...prev.slice(0, 19)]);
+          } else {
+            errorMessages.push(`Failed to send reply to ${recipientEmail}: ${replyData.error || 'Unknown error'}`);
+          }
+        } catch (error: any) {
+          errorMessages.push(`Error processing ${email.from}: ${error.message}`);
+        }
+      }
+
+      if (successCount > 0) {
+        setReplySuccess(`Successfully sent ${successCount} out of ${selectedEmailObjects.length} replies!`);
+        setSelectedEmails([]);
+        setTimeout(() => setReplySuccess(null), 5000);
+      }
+      
+      if (errorMessages.length > 0) {
+        setReplyError(`Some errors occurred:\n${errorMessages.join('\n')}`);
+      }
+
+    } catch (error: any) {
+      console.error('Failed to generate and send replies:', error);
+      setReplyError(error.message || 'Failed to generate and send replies. Please try again.');
+    } finally {
+      setIsReplying(false);
+    }
+  };
+
+  // Send reply from chat page
+  const sendReplyFromChat = async (emailContent: string, originalEmail: InboxEmail) => {
+    try {
+      const fromMatch = originalEmail.from.match(/<([^>]+)>/);
+      const recipientEmail = fromMatch ? fromMatch[1] : originalEmail.from;
+
+      const payload = {
+        thread_id: originalEmail.threadId,
+        body: emailContent,
+        to: recipientEmail
+      };
+      
+      const response = await fetch(`${API_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: JSON.stringify(payload),
+          conversationId: currentConversationId,
+          userId: 'user-123',
+          context: {
+            emailReplyRequest: true
+          }
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.ok) {
+        // Add success message to chat
+        const successMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `✅ Reply sent successfully to ${recipientEmail}`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, successMessage]);
+        
+        // Add to email history
+        const newEmail: EmailHistory = {
+          id: Date.now().toString(),
+          to: recipientEmail,
+          subject: `Re: ${originalEmail.subject}`,
+          body: emailContent,
+          sentAt: new Date(),
+          status: 'sent',
+          response: data
+        };
+        
+        setEmailHistory(prev => [newEmail, ...prev.slice(0, 19)]);
+        
+        return { success: true, message: 'Reply sent successfully' };
+      } else {
+        throw new Error(data.error || 'Failed to send reply');
+      }
+    } catch (error: any) {
+      console.error('Failed to send email reply:', error);
+      return { success: false, message: error.message || 'Failed to send reply' };
+    }
+  };
+
+  // Handle email reply request in chat
+  const handleEmailReplyInChat = async (email: InboxEmail) => {
+    setIsLoading(true);
+    
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: `Reply to email from ${email.from} with subject: ${email.subject}`,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
+
+    try {
+      const emailContent = `
+Original Email:
+From: ${email.from}
+Subject: ${email.subject}
+Date: ${email.date}
+
+Content:
+${email.body}
+
+Please write a professional and appropriate reply to this email. Consider:
+1. Acknowledge the sender's message
+2. Address their concerns or questions
+3. Provide helpful information if needed
+4. End with a polite closing
+`;
+      
+      const response = await fetch(`${API_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `Generate a reply to this email: ${emailContent}`,
+          conversationId: currentConversationId,
+          userId: 'user-123',
+          context: {
+            emailReplyRequest: true,
+            originalEmail: {
+              from: email.from,
+              subject: email.subject,
+              body: email.body
+            }
+          }
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.text) {
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: data.text,
+          timestamp: new Date(),
+          issueType: 'email_reply',
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+        
+        // Add a button to send the reply
+        const sendButtonMessage: Message = {
+          id: (Date.now() + 2).toString(),
+          role: 'assistant',
+          content: `Would you like to send this reply?`,
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, sendButtonMessage]);
+        
+        // Store the generated reply for sending
+        const sendReply = async () => {
+          const result = await sendReplyFromChat(data.text, email);
+          if (result.success) {
+            const confirmationMessage: Message = {
+              id: (Date.now() + 3).toString(),
+              role: 'assistant',
+              content: `✅ ${result.message}`,
+              timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, confirmationMessage]);
+          }
+        };
+        
+        // You can add a button here or handle it differently
+        // For now, we'll auto-send after showing the reply
+        setTimeout(() => {
+          sendReply();
+        }, 1000);
+        
+      } else {
+        throw new Error(data.error || 'Failed to generate reply');
+      }
+    } catch (error: any) {
+      console.error('Failed to handle email reply:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: `❌ Failed to generate email reply: ${error.message}`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const testEmailConnection = async () => {
     try {
       const response = await fetch(`${API_URL}/email/config`);
@@ -1028,7 +1371,6 @@ export default function ChatInterface() {
         setMessages((prev) => [...prev, assistantMessage]);
         setIsConnected(true);
         
-        // Update conversation list with new message
         await loadAllConversations();
       } else {
         throw new Error(data.error || 'No response from assistant');
@@ -1188,185 +1530,187 @@ export default function ChatInterface() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col">
         {activeTab === 'chat' && (
-          <>
-            <div className="bg-white/80 backdrop-blur-xl border-b border-slate-200/60 px-8 py-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-blue-900 bg-clip-text text-transparent">
-                    Support Chat
-                  </h1>
-                  <p className="text-sm text-slate-600 mt-1.5 font-medium">
-                    Get help with billing and technical issues
+  <>
+    <div className="bg-white/80 backdrop-blur-xl border-b border-slate-200/60 px-8 py-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-blue-900 bg-clip-text text-transparent">
+            Support Chat
+          </h1>
+          <p className="text-sm text-slate-600 mt-1.5 font-medium">
+            Get help with billing, technical issues, and email replies
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500 font-medium">
+            Conversation ID:
+          </span>
+          <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
+            {currentConversationId}
+          </span>
+          <button
+            onClick={async () => {
+              const newId = `chat-${Date.now()}`;
+              setCurrentConversationId(newId);
+              setMessages([]);
+              await loadAllConversations();
+            }}
+            className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-medium bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-lg transition-colors"
+          >
+            <Plus className="w-3 h-3" />
+            New Chat
+          </button>
+        </div>
+      </div>
+    </div>
+
+             <div className="flex-1 overflow-hidden flex flex-col">
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="max-w-4xl mx-auto space-y-4">
+          {messages.length === 0 && (
+            <div className="text-center text-slate-500 py-20 px-4">
+              <div className="max-w-md mx-auto">
+                <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl flex items-center justify-center shadow-xl">
+                  <MessageSquare className="w-10 h-10 text-white" />
+                </div>
+                <p className="text-xl font-bold text-slate-800 mb-3">
+                  Welcome to Support Chat!
+                </p>
+                <p className="text-sm text-slate-600 mb-4">
+                  Ask me about billing issues, technical problems, or request email replies.
+                </p>
+              </div>
+              {isConnected === false && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 max-w-md mx-auto mt-6">
+                  <p className="text-sm text-red-800">
+                    ⚠️ Cannot connect to backend server at <strong>{API_URL}</strong>
+                    <br />
+                    Please make sure your backend is running.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500 font-medium">
-                    Conversation ID:
-                  </span>
-                  <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
-                    {currentConversationId}
-                  </span>
-                  <button
-                    onClick={async () => {
-                      // Create new conversation
-                      const newId = `chat-${Date.now()}`;
-                      setCurrentConversationId(newId);
-                      setMessages([]);
-                      await loadAllConversations();
-                    }}
-                    className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-medium bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-lg transition-colors"
-                  >
-                    <Plus className="w-3 h-3" />
-                    New Chat
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-              {messages.length === 0 && (
-                <div className="text-center text-slate-500 mt-20 px-4">
-                  <div className="max-w-md mx-auto">
-                    <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl flex items-center justify-center shadow-xl">
-                      <MessageSquare className="w-10 h-10 text-white" />
-                    </div>
-                    <p className="text-xl font-bold text-slate-800 mb-3">
-                      Welcome to Support Chat!
-                    </p>
-                    <p className="text-sm text-slate-600 mb-4">
-                      Ask me about billing issues, technical problems, or upload screenshots.
-                    </p>
-            
-                  </div>
-                  {isConnected === false && (
-                    <div className="bg-red-50 border border-red-200 rounded-xl p-4 max-w-md mx-auto mt-6">
-                      <p className="text-sm text-red-800">
-                        ⚠️ Cannot connect to backend server at <strong>{API_URL}</strong>
-                        <br />
-                        Please make sure your backend is running.
-                      </p>
-                    </div>
-                  )}
-                </div>
               )}
+            </div>
+          )}
 
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex ${
-                    message.role === 'user' ? 'justify-end' : 'justify-start'
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${
+                message.role === 'user' ? 'justify-end' : 'justify-start'
+              }`}
+            >
+              <div
+                className={`max-w-[75%] rounded-2xl px-5 py-3.5 shadow-sm ${
+                  message.role === 'user'
+                    ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-blue-500/20'
+                    : 'bg-white text-slate-900 border border-slate-200/60'
+                }`}
+              >
+                {message.imageUrl && (
+                  <img
+                    src={message.imageUrl}
+                    alt="Uploaded"
+                    className="rounded-xl mb-3 max-w-full h-auto shadow-sm"
+                  />
+                )}
+                <p className="whitespace-pre-wrap break-words leading-relaxed text-[15px]">
+                  {message.content}
+                </p>
+                {message.issueType && message.role === 'assistant' && (
+                  <div className="mt-3 pt-3 border-t border-slate-200 text-xs text-slate-600">
+                    <span className="font-semibold">Issue Type:</span>{' '}
+                    <span className="capitalize font-medium">{message.issueType}</span>
+                  </div>
+                )}
+                <p
+                  className={`text-xs mt-2 font-medium ${
+                    message.role === 'user'
+                      ? 'text-blue-100'
+                      : 'text-slate-500'
                   }`}
                 >
-                  <div
-                    className={`max-w-[75%] rounded-2xl px-5 py-3.5 shadow-sm ${
-                      message.role === 'user'
-                        ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-blue-500/20'
-                        : 'bg-white text-slate-900 border border-slate-200/60'
-                    }`}
-                  >
-                    {message.imageUrl && (
-                      <img
-                        src={message.imageUrl}
-                        alt="Uploaded"
-                        className="rounded-xl mb-3 max-w-full h-auto shadow-sm"
-                      />
-                    )}
-                    <p className="whitespace-pre-wrap break-words leading-relaxed text-[15px]">
-                      {message.content}
-                    </p>
-                    {message.issueType && message.role === 'assistant' && (
-                      <div className="mt-3 pt-3 border-t border-slate-200 text-xs text-slate-600">
-                        <span className="font-semibold">Issue Type:</span>{' '}
-                        <span className="capitalize font-medium">{message.issueType}</span>
-                      </div>
-                    )}
-                    <p
-                      className={`text-xs mt-2 font-medium ${
-                        message.role === 'user'
-                          ? 'text-blue-100'
-                          : 'text-slate-500'
-                      }`}
-                    >
-                      {message.timestamp.toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </p>
-                  </div>
-                </div>
-              ))}
-
-              {isLoading && (
-                <div className="flex justify-start">
-                  <div className="bg-white border border-slate-200 rounded-2xl px-5 py-3.5 shadow-sm">
-                    <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
-                  </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            <div className="bg-white/80 backdrop-blur-xl border-t border-slate-200/60 px-6 py-5 shadow-lg">
-              {imagePreview && (
-                <div className="mb-4 relative inline-block">
-                  <img
-                    src={imagePreview}
-                    alt="Preview"
-                    className="h-24 w-24 object-cover rounded-xl border-2 border-blue-500 shadow-lg"
-                  />
-                  <button
-                    onClick={removeImage}
-                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors shadow-lg"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
-              <div className="flex items-end gap-3">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleImageSelect}
-                  accept="image/*"
-                  className="hidden"
-                />
-
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isLoading}
-                  className="flex-shrink-0 p-3 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <Paperclip className="w-5 h-5 text-slate-700" />
-                </button>
-
-                <textarea
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  placeholder="Type your message..."
-                  disabled={isLoading}
-                  className="flex-1 resize-none border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-base placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-500"
-                  rows={1}
-                  style={{ minHeight: '48px', maxHeight: '120px' }}
-                />
-
-                <button
-                  onClick={sendMessage}
-                  disabled={isLoading || (!inputText.trim() && !selectedImage)}
-                  className="flex-shrink-0 p-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-500/30"
-                >
-                  <Send className="w-5 h-5" />
-                </button>
+                  {message.timestamp.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </p>
               </div>
-
-              <p className="text-xs text-slate-500 mt-3 px-1 font-medium">
-                Press Enter to send • Shift+Enter for new line
-              </p>
             </div>
-          </>
-        )}
+          ))}
+
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="bg-white border border-slate-200 rounded-2xl px-5 py-3.5 shadow-sm">
+                <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+      </div>
+    </div>
+
+            <div className="flex-shrink-0 bg-white/80 backdrop-blur-xl border-t border-slate-200/60 px-6 py-5 shadow-lg">
+      {imagePreview && (
+        <div className="mb-4 relative inline-block">
+          <img
+            src={imagePreview}
+            alt="Preview"
+            className="h-24 w-24 object-cover rounded-xl border-2 border-blue-500 shadow-lg"
+          />
+          <button
+            onClick={removeImage}
+            className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1.5 hover:bg-red-600 transition-colors shadow-lg"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-end gap-3">
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleImageSelect}
+          accept="image/*"
+          className="hidden"
+        />
+
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isLoading}
+          className="flex-shrink-0 p-3 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Paperclip className="w-5 h-5 text-slate-700" />
+        </button>
+
+        <textarea
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          onKeyDown={handleKeyPress}
+          placeholder="Type your message or ask to reply to an email..."
+          disabled={isLoading}
+          className="flex-1 resize-none border border-slate-300 rounded-xl px-4 py-3 text-slate-900 text-base placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-500"
+          rows={1}
+          style={{ minHeight: '48px', maxHeight: '120px' }}
+        />
+
+        <button
+          onClick={sendMessage}
+          disabled={isLoading || (!inputText.trim() && !selectedImage)}
+          className="flex-shrink-0 p-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-500/30"
+        >
+          <Send className="w-5 h-5" />
+        </button>
+      </div>
+
+      <p className="text-xs text-slate-500 mt-3 px-1 font-medium">
+        Press Enter to send • Shift+Enter for new line
+      </p>
+    </div>
+  </>
+)}
 
         {activeTab === 'tools' && (
           <>
@@ -2273,10 +2617,10 @@ export default function ChatInterface() {
                 </div>
                 <div>
                   <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 to-blue-900 bg-clip-text text-transparent">
-                    Send Email
+                    Email Management
                   </h1>
                   <p className="text-sm text-slate-600 mt-1 font-medium">
-                    Compose and send emails to stakeholders
+                    Compose, send, and reply to emails
                   </p>
                 </div>
               </div>
@@ -2284,7 +2628,7 @@ export default function ChatInterface() {
 
             <div className="flex-1 overflow-y-auto px-8 py-6">
               <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Left Column: Email Form */}
+                {/* Left Column: Email Form and Inbox */}
                 <div className="lg:col-span-2 space-y-6">
                   {emailSuccess && (
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-3">
@@ -2294,6 +2638,21 @@ export default function ChatInterface() {
                         <button
                           onClick={() => setEmailSuccess(null)}
                           className="text-xs text-emerald-700 hover:text-emerald-800 mt-1 font-medium"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {replySuccess && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+                      <CheckCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm text-blue-800 font-medium">{replySuccess}</p>
+                        <button
+                          onClick={() => setReplySuccess(null)}
+                          className="text-xs text-blue-700 hover:text-blue-800 mt-1 font-medium"
                         >
                           Dismiss
                         </button>
@@ -2316,9 +2675,34 @@ export default function ChatInterface() {
                     </div>
                   )}
 
+                  {replyError && (
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+                      <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-sm text-red-800 font-medium">{replyError}</p>
+                        <button
+                          onClick={() => setReplyError(null)}
+                          className="text-xs text-red-700 hover:text-red-800 mt-1 font-medium"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="bg-white rounded-2xl border border-slate-200/60 shadow-lg overflow-hidden">
                     <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50">
-                      <h2 className="text-xl font-bold text-slate-900">Compose Email</h2>
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-bold text-slate-900">Compose Email</h2>
+                        <button
+                          onClick={loadInboxEmails}
+                          disabled={isLoadingInbox}
+                          className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isLoadingInbox ? 'animate-spin' : ''}`} />
+                          Refresh Inbox
+                        </button>
+                      </div>
                     </div>
 
                     <div className="p-6 space-y-5">
@@ -2422,7 +2806,7 @@ export default function ChatInterface() {
                           onChange={(e) => setEmailBody(e.target.value)}
                           placeholder="Enter your message here..."
                           disabled={isSendingEmail}
-                          rows={12}
+                          rows={8}
                           className="w-full border border-slate-300 rounded-xl px-4 py-3 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-100 disabled:cursor-not-allowed font-medium resize-none"
                         />
                       </div>
@@ -2469,6 +2853,180 @@ export default function ChatInterface() {
                           )}
                         </button>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Inbox Emails with Selection */}
+                  <div className="bg-white rounded-2xl border border-slate-200/60 shadow-lg overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <h3 className="text-lg font-bold text-slate-900">Inbox Emails</h3>
+                          {selectedEmails.length > 0 && (
+                            <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">
+                              {selectedEmails.length} selected
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleSelectAll}
+                            className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                          >
+                            {selectedEmails.length === inboxEmails.length ? (
+                              <>
+                                <CircleCheck className="w-4 h-4" />
+                                Deselect All
+                              </>
+                            ) : (
+                              <>
+                                <Circle className="w-4 h-4" />
+                                Select All
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={loadInboxEmails}
+                            disabled={isLoadingInbox}
+                            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                          >
+                            <RefreshCw className={`w-4 h-4 ${isLoadingInbox ? 'animate-spin' : ''}`} />
+                            Refresh
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="max-h-[500px] overflow-y-auto">
+                      {isLoadingInbox ? (
+                        <div className="flex items-center justify-center py-12">
+                          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                        </div>
+                      ) : inboxEmails.length === 0 ? (
+                        <div className="text-center py-12 text-slate-500">
+                          <Mail className="w-16 h-16 mx-auto mb-4 text-slate-400" />
+                          <p className="text-base font-semibold text-slate-700">No emails in inbox</p>
+                          <p className="text-sm mt-2">Your inbox is empty</p>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Reply Button for Selected Emails */}
+                          {selectedEmails.length > 0 && (
+                            <div className="sticky top-0 z-10 px-6 py-4 bg-blue-50 border-b border-blue-200">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse" />
+                                  <span className="text-sm font-semibold text-blue-800">
+                                    {selectedEmails.length} email{selectedEmails.length !== 1 ? 's' : ''} selected
+                                  </span>
+                                </div>
+                                <button
+                                  onClick={generateAndSendReplies}
+                                  disabled={isReplying}
+                                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 disabled:opacity-50 font-semibold shadow-lg shadow-blue-500/30"
+                                >
+                                  {isReplying ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                      <span>Processing...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Reply className="w-4 h-4" />
+                                      <span>Reply with AI</span>
+                                      {selectedEmails.length > 1 && (
+                                        <span className="ml-1 bg-blue-800 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                                          {selectedEmails.length}
+                                        </span>
+                                      )}
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Email List */}
+                          {inboxEmails.map((email) => (
+                            <div
+                              key={email.id}
+                              className={`px-6 py-4 border-b border-slate-200/60 hover:bg-slate-50/50 transition-colors ${
+                                selectedEmails.includes(email.id) ? 'bg-blue-50/50' : ''
+                              }`}
+                            >
+                              <div className="flex items-start gap-3">
+                                {/* Radio Button for Selection */}
+                                <div className="flex-shrink-0 pt-1">
+                                  <button
+                                    onClick={() => handleEmailSelect(email.id)}
+                                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all ${
+                                      selectedEmails.includes(email.id)
+                                        ? 'border-blue-600 bg-blue-600'
+                                        : 'border-slate-300 hover:border-blue-400'
+                                    }`}
+                                  >
+                                    {selectedEmails.includes(email.id) && (
+                                      <Circle className="w-3 h-3 text-white fill-current" />
+                                    )}
+                                  </button>
+                                </div>
+
+                                <div className="flex-1">
+                                  <div className="flex items-start justify-between mb-2">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className={`w-2 h-2 rounded-full ${email.unread ? 'bg-blue-500' : 'bg-slate-300'}`} />
+                                        <p className="text-sm font-semibold text-slate-900 truncate">{email.from}</p>
+                                      </div>
+                                      <p className="text-sm font-bold text-slate-800">{email.subject}</p>
+                                      <p className="text-xs text-slate-500 mt-1">{email.date}</p>
+                                    </div>
+                                    {selectedEmails.includes(email.id) && (
+                                      <div className="flex-shrink-0">
+                                        <span className="text-xs bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded-full">
+                                          Selected
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-slate-700 line-clamp-2 mt-2">{email.snippet}</p>
+                                  <div className="flex items-center gap-4 mt-2">
+                                    <span className="text-xs text-slate-400 font-medium">
+                                      Thread ID: {email.threadId.substring(0, 8)}...
+                                    </span>
+                                    <button
+                                      onClick={() => {
+                                        // Add to selection if not already selected
+                                        if (!selectedEmails.includes(email.id)) {
+                                          handleEmailSelect(email.id);
+                                        }
+                                      }}
+                                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium"
+                                    >
+                                      <Reply className="w-3.5 h-3.5" />
+                                      Select for Reply
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        // Switch to chat and handle email reply
+                                        setActiveTab('chat');
+                                        // Add a small delay to ensure chat tab is loaded
+                                        setTimeout(() => {
+                                          handleEmailReplyInChat(email);
+                                        }, 100);
+                                      }}
+                                      className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 font-medium"
+                                    >
+                                      <MessageSquare className="w-3.5 h-3.5" />
+                                      Reply in Chat
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -2647,16 +3205,58 @@ export default function ChatInterface() {
                       </div>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <Clock className="w-4 h-4" />
-                          <span className="text-sm">Last Sent</span>
+                          <Reply className="w-4 h-4" />
+                          <span className="text-sm">AI Replies</span>
                         </div>
-                        <span className="text-sm">
-                          {emailHistory.length > 0 
-                            ? emailHistory[0].sentAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                            : 'Never'
-                          }
+                        <span className="text-xl font-bold">
+                          {emailHistory.filter(e => e.subject.startsWith('Re: ')).length}
                         </span>
                       </div>
+                      <div className="flex items-center justify-between pt-3 border-t border-blue-500/30">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4" />
+                          <span className="text-sm">Inbox</span>
+                        </div>
+                        <span className="text-xl font-bold">{inboxEmails.length}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Reply Configuration */}
+                  <div className="bg-white rounded-2xl border border-slate-200/60 shadow-lg overflow-hidden">
+                    <div className="px-6 py-5 border-b border-slate-200/60 bg-slate-50/50">
+                      <h3 className="text-lg font-bold text-slate-900">AI Reply Settings</h3>
+                    </div>
+                    
+                    <div className="p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-slate-700">Selected Emails</span>
+                        <span className="text-xs font-bold text-blue-600">
+                          {selectedEmails.length}
+                        </span>
+                      </div>
+                      {selectedEmails.length > 0 && (
+                        <button
+                          onClick={generateAndSendReplies}
+                          disabled={isReplying}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl transition-all duration-200 disabled:opacity-50 font-semibold shadow-lg shadow-blue-500/30"
+                        >
+                          {isReplying ? (
+                            <>
+                              <Loader2 className="w-5 h-5 animate-spin" />
+                              <span>Processing {selectedEmails.length} emails...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Reply className="w-5 h-5" />
+                              <span>Reply to Selected</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                      <p className="text-xs text-slate-500">
+                        AI generates personalized replies for each selected email.
+                      </p>
                     </div>
                   </div>
                 </div>
