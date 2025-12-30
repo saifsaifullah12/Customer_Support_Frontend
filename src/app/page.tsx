@@ -92,7 +92,7 @@ interface ConversationHistory {
   messages?: Message[];
 }
 
-const API_URL = 'http://localhost:4000';
+const API_URL = 'https://customer-support-backend-nspr.onrender.com';
 
 export default function ChatInterface() {
   const [activeTab, setActiveTab] = useState<'chat' | 'guardrails' | 'evals' | 'email' | 'tools' | 'history'>('chat');
